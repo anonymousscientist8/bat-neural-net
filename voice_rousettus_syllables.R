@@ -1,161 +1,184 @@
 rm(list = ls())
 gc()
 
-# =========================
 # Load packages
-# =========================
-library(keras)
+library(reticulate)
+library(keras3)
 library(signal)
 library(tidyverse)
 library(tuneR)
 library(caret)
 library(uwot)
 library(RColorBrewer)
+library(reticulate)
+library(tensorflow)
 
-# =========================
 # Read annotation table
-# =========================
-d <- read.csv("C:\\Users\\Raven\\Downloads\\AnnotationTable.csv", header = TRUE)
-d <- d[d$CallType != "", ]
+d <- read.csv("C:\\Users\\crave\\Downloads\\AnnotationTable.csv", header = TRUE)
+d <- d[d$CallType != "", ] # Get rid of calls without annotation
 
-# =========================
+# Extract sex, individual IDs, and hearing capability
+d$Sex <- substr(d$MicFileName, 1, 1)
+d$Individual <- substr(d$MicFileName, 1, 2)
+d$Hearing <- substr(d$MicFileName, 4, 4)
+
+d <- d[d$Hearing == "H",]
+
 # Encode call types
-# =========================
 d <- d[d$CallType != "Un",]
 call_map <- c(
   "BB" = 1, "Pi" = 2, "Ch" = 3, "Sq" = 4,
   "Bu" = 5, "LT" = 6, "Ra" = 7, "Pa" = 8, "Ba" = 9,
   "SB" = 10, "PB" = 11, "Tr" = 12, "LPi" = 13
 )
-
+# call_map3 <- c(
+#   "M" = 1, "F" = 2
+# )
+# call_map3 <- c(
+#   "D" = 1, "H" = 2
+# )
+# call_map3 <- c(
+#   "M3" = 1, "M4" = 2, "F4" = 3, "F5" = 4, "F6" = 5
+# )
+# call_map3 <- c(
+#   "M3" = 1, "M4" = 2, "F4" = 3, "F5" = 4, "F6" = 5,
+#   "F3" = 6, "F1" = 7, "M2" = 8, "F2" = 9, "M1" = 10
+# )
 d$CallType <- as.numeric(call_map[d$CallType])
+unique(d$CallType)
 
-# =========================
+#d <- d[d$Individual == "F6",]
+#d <- d[d$CallType == 13,]
+
+# for (i in 1:length(unique(d$CallType))) {
+#   if (length(d$CallType[d$CallType == i]) < 200) {
+#     d <- d[d$CallType != i,]
+#   }
+# }
+
+# d1 <- c("M3", length(d$CallType[d$CallType == 1 & d$Individual == "M3"]),
+#         length(d$CallType[d$CallType == 2 & d$Individual == "M3"]),
+#         length(d$CallType[d$CallType == 5 & d$Individual == "M3"]),
+#         length(d$CallType[d$CallType == 6 & d$Individual == "M3"]),
+#         length(d$CallType[d$CallType == 8 & d$Individual == "M3"]),
+#         length(d$CallType[d$CallType == 13 & d$Individual == "M3"]))
+# d2 <- c("M4", length(d$CallType[d$CallType == 1 & d$Individual == "M4"]),
+#         length(d$CallType[d$CallType == 2 & d$Individual == "M4"]),
+#         length(d$CallType[d$CallType == 5 & d$Individual == "M4"]),
+#         length(d$CallType[d$CallType == 6 & d$Individual == "M4"]),
+#         length(d$CallType[d$CallType == 8 & d$Individual == "M4"]),
+#         length(d$CallType[d$CallType == 13 & d$Individual == "M4"]))
+# d3 <- c("F4", length(d$CallType[d$CallType == 1 & d$Individual == "F4"]),
+#         length(d$CallType[d$CallType == 2 & d$Individual == "F4"]),
+#         length(d$CallType[d$CallType == 5 & d$Individual == "F4"]),
+#         length(d$CallType[d$CallType == 6 & d$Individual == "F4"]),
+#         length(d$CallType[d$CallType == 8 & d$Individual == "F4"]),
+#         length(d$CallType[d$CallType == 13 & d$Individual == "F4"]))
+# d4 <- c("F5", length(d$CallType[d$CallType == 1 & d$Individual == "F5"]),
+#         length(d$CallType[d$CallType == 2 & d$Individual == "F5"]),
+#         length(d$CallType[d$CallType == 5 & d$Individual == "F5"]),
+#         length(d$CallType[d$CallType == 6 & d$Individual == "F5"]),
+#         length(d$CallType[d$CallType == 8 & d$Individual == "F5"]),
+#         length(d$CallType[d$CallType == 13 & d$Individual == "F5"]))
+# d5 <- c("F6", length(d$CallType[d$CallType == 1 & d$Individual == "F6"]),
+#         length(d$CallType[d$CallType == 2 & d$Individual == "F6"]),
+#         length(d$CallType[d$CallType == 5 & d$Individual == "F6"]),
+#         length(d$CallType[d$CallType == 6 & d$Individual == "F6"]),
+#         length(d$CallType[d$CallType == 8 & d$Individual == "F6"]),
+#         length(d$CallType[d$CallType == 13 & d$Individual == "F6"]))
+# df <- as.data.frame(rbind(d1,d2,d3,d4,d5))
+# rownames(df) <- NULL
+# df[,2:7] <- lapply(df[,2:7], as.numeric)
+# chisq.test(as.matrix(df[,2:7]))
+
+# d <- d[d$CallType == 13,]
+
+# Re-number remaining call types consecutively from 1
+#d$CallType <- match(d$CallType, sort(unique(d$CallType)))
+
+#d$CallType <- as.numeric(call_map3[d$Hearing])
+#d$CallType <- as.numeric(call_map3[d$Sex])
+# d$CallType <- as.numeric(call_map3[d$Individual])
+
+unique(d$CallType)
+
 # File paths
-# =========================
 paths <- paste0(
-  "C:/Users/Raven/VocDataBase/VocDataBase/",
+  "C:/Users/crave/Downloads/VocDataBase/VocDataBase/",
   d$ALFileName
 )
 
-# =========================
 # Audio loader
-# =========================
 get_wave <- function(fname) {
-  readWave(fname)@left / 32768
+  readWave(fname)@left / 32767
 }
-
 waves <- map(paths, get_wave)
 
+# Get lengths
 lengths <- sapply(waves, length)
 
-max_samples <- ceiling(50000 * 0.5)
+# Get sample rate
 sr <- readWave(paths[1])@samp.rate
-fs <- sr / 4
+fs <- sr
+max_samples <- ceiling(25000) # Set max we are look at to half second calls
 
-keep <- lengths <= max(lengths)
-
+keep <- lengths <= max(lengths) # Currently set to keep all calls
+#keep <- lengths <= max_samples # Currently set to restrict calls we look at
 d     <- d[keep, ]
 waves <- waves[keep]
+waves_ds <- waves
 
-# Downsample
-waves_ds <- lapply(waves, function(x) decimate(x, 4))
+# # Normalize the amplitude by call
+for (i in 1:length(d$MicFileName)) {
+  mu <- mean(waves_ds[[i]], na.rm = TRUE)
+  sigma <- sd(waves_ds[[i]], na.rm = TRUE)
+  waves_ds[[i]] <- (waves_ds[[i]] - mu) / sigma
+}
 
-# =========================
 # Stratified 80/20 split
-# =========================
-
 train_idx <- unlist(
   lapply(unique(d$CallType), function(k) {
     idx <- which(d$CallType == k)
     sample(idx, size = floor(0.8 * length(idx)))
   })
 )
-
 test_idx <- setdiff(seq_len(nrow(d)), train_idx)
 
-# =========================
-# Spectrogram parameters
-# =========================
-win_length <- 64
-hop_length <- 16
-n_fft <- 128
+# test_individual <- "F6"
+# 
+# test_idx <- which(d$Individual == test_individual)
+# train_idx <- setdiff(seq_len(nrow(d)), test_idx)
 
-max_time_bins <- 256   # time dimension
-max_freq_bins <- n_fft / 2 + 1
 
-# =========================
-# Spectrogram function
-# =========================
-make_spectrogram <- function(x) {
-  
-  spec <- specgram(
-    x,
-    n = n_fft,
-    Fs = fs,
-    window = hamming(win_length),
-    overlap = win_length - hop_length
-  )
-  
-  S <- spec$S
-  if (is.null(dim(S))) {
-    S <- matrix(S, ncol = 1)
-  }
-  
-  S <- abs(S)
-  
-  # Protect against zeros / invalid values
-  S[!is.finite(S)] <- 0
-  
-  S <- log10(S + 1e-8)
-  
-  S[!is.finite(S)] <- 0
-  
-  S_fixed <- matrix(0, max_freq_bins, max_time_bins)
-  
-  f <- min(nrow(S), max_freq_bins)
-  t <- min(ncol(S), max_time_bins)
-  
-  t_start <- floor((max_time_bins - t) / 2) + 1
-  S_fixed[1:f, t_start:(t_start + t - 1)] <- S[1:f, 1:t]
-  
-  # ----- SAFE normalization -----
-  mu <- mean(S_fixed, na.rm = TRUE)
-  sigma <- sd(S_fixed, na.rm = TRUE)
-  
-  if (!is.na(sigma) && sigma > 0) {
-    S_fixed <- (S_fixed - mu) / sigma
-  } else {
-    S_fixed[,] <- 0
-  }
-  
-  return(S_fixed)
-}
-
-# =========================
-# Build spectrogram array
-# =========================
-specs <- array(
-  0,
-  dim = c(length(waves_ds), max_freq_bins, max_time_bins, 1)
-)
-
-for (i in seq_along(waves_ds)) {
-  specs[i, , , 1] <- make_spectrogram(waves_ds[[i]])
-}
-
-# =========================
-# Prepare waveform array
-# =========================
-max_len <- floor(fs * 0.5) # 1 second max
-waveforms <- matrix(0, length(waves_ds), max_len)
-for (i in seq_along(waves_ds)) {
+# Prepare waveform
+max_len <- floor(25000)
+waveforms <- matrix(0, length(waves_ds), max_len) # Zero pad
+for (i in seq_along(waves_ds)) { # Fill in with sound
   waveforms[i, 1:min(max_len, length(waves_ds[[i]]))] <- head(waves_ds[[i]], max_len)
 }
 
-# =========================
+# max_len2 <- 250000
+# step <- 10
+# max_len <- ceiling(max_len2 / step)
+# 
+# waveforms <- matrix(
+#   0,
+#   length(waves_ds),
+#   ceiling(max_len2 / step)
+# )
+# 
+# for (i in seq_along(waves_ds)) {
+#   x <- waves_ds[[i]]
+#   
+#   # Take every 10th sample from the first 250,000
+#   idx <- seq(1, min(max_len2, length(x)), by = step)
+#   sampled <- x[idx]
+#   
+#   # Fill waveform matrix
+#   waveforms[i, 1:length(sampled)] <- sampled
+# }
+
 # Train / Test split
-# =========================
 x_train_wave <- array_reshape(
   waveforms[train_idx, ],
   c(length(train_idx), max_len, 1)
@@ -166,13 +189,10 @@ x_test_wave <- array_reshape(
   c(length(test_idx), max_len, 1)
 )
 
-x_train_spec <- specs[train_idx, , , ]
-x_test_spec  <- specs[test_idx,  , , ]
-
 y_train <- d$CallType[train_idx] - 1
 y_test  <- d$CallType[test_idx] - 1
 
-num_classes <- 13
+num_classes <- 13#length(unique(c(y_train, y_test)))
 y_train <- to_categorical(y_train, num_classes)
 y_test  <- to_categorical(y_test, num_classes)
 
@@ -192,23 +212,18 @@ wave_branch <- wave_input %>%
   layer_max_pooling_1d(8) %>%
   layer_conv_1d(16, 32, activation = "gelu") %>%
   layer_max_pooling_1d(8) %>%
+  layer_conv_1d(32, 64, activation = "gelu") %>%
+  layer_max_pooling_1d(8) %>%
   layer_gru(32)
 
-# Spectrogram branch
-spec_input <- layer_input(shape = c(max_freq_bins, max_time_bins, 1), name = "spec_input")
-spec_branch <- spec_input %>%
-  layer_conv_2d(8, c(8,8), activation = "gelu") %>%
-  layer_max_pooling_2d(c(2,2)) %>%
-  layer_conv_2d(16, c(16,16), activation = "gelu") %>%
-  layer_global_average_pooling_2d()
-
 # Combine
-combined <- layer_concatenate(list(wave_branch, spec_branch)) %>%
+combined <- layer_concatenate(list(wave_branch)) %>%#, spec_branch)) %>%
   layer_dense(32, activation = "gelu") %>%
-  layer_dropout(0.3) %>%
+  #layer_dropout(0.3) %>%
   layer_dense(num_classes, activation = "softmax")
 
-model <- keras_model(inputs = list(wave_input, spec_input), outputs = combined)
+#model <- keras_model(inputs = list(wave_input, spec_input), outputs = combined)
+model <- keras_model(inputs = wave_input, outputs = combined)
 
 model %>% compile(
   optimizer = optimizer_adam(1e-3),
@@ -220,9 +235,9 @@ summary(model)
 
 # =========================
 # Train
-# =========================
+
 history <- model %>% fit(
-  x = list(x_train_wave, x_train_spec),
+  x = list(x_train_wave),#, x_train_spec),
   y = y_train,
   batch_size = 16,
   epochs = 10,
@@ -233,7 +248,7 @@ history <- model %>% fit(
 # =========================
 # Evaluate
 # =========================
-y_pred_probs <- model %>% predict(list(x_test_wave, x_test_spec))
+y_pred_probs <- model %>% predict(list(x_test_wave))#, x_test_spec))
 max_probs <- y_pred_probs[max.col(y_pred_probs)]
 y_pred <- apply(y_pred_probs, 1, which.max) - 1
 y_true <- apply(y_test, 1, which.max) - 1
@@ -257,66 +272,20 @@ cat("Top-2 accuracy: ", top_k_accuracy, "\n")
 
 confusionMatrix(factor(y_pred), factor(y_true))
 
-# =========================
-# UMAP
-# =========================
-embed_model <- keras_model(
-  inputs = model$inputs,
-  outputs = get_layer(model, "dense_4")$output
+cm <- confusionMatrix(
+  factor(y_pred, levels = 0:12),
+  factor(y_true, levels = 0:12)
 )
 
-emb <- predict(embed_model, list(x_test_wave, x_test_spec))
+cm_df <- as.data.frame.matrix(cm$table)
 
-um <- umap(
-  emb,
-  n_neighbors = 15,
-  min_dist = 0.1,
-  metric = "cosine"
+cm_df <- cbind(
+  Prediction = rownames(cm_df),
+  cm_df
 )
 
-df <- data.frame(
-  UMAP1 = um[,1],
-  UMAP2 = um[,2],
-  CallType = factor(y_true),
-  Correct = y_pred == y_true
+write.csv(
+  cm_df,
+  "confusion_matrix.csv",
+  row.names = FALSE
 )
-
-ggplot(df, aes(UMAP1, UMAP2, color = CallType)) +
-  geom_point(size=1, alpha=0.7) +
-  theme_minimal() +
-  ggtitle("UMAP of waveform + spectrogram embeddings")
-
-ggplot(df, aes(UMAP1, UMAP2, color = Correct)) +
-  geom_point(alpha = 0.7, size = 1) +
-  theme_minimal() +
-  labs(title = "UMAP: Correct vs Incorrect")
-
-
-# Use a subset if memory is tight
-n_umap <- length(d$MicFileName)
-idx <- sample(seq_len(dim(specs)[1]), n_umap)
-
-spec_flat <- matrix(0, n_umap, max_freq_bins * max_time_bins)
-for (i in seq_len(n_umap)) {
-  spec_flat[i, ] <- as.vector(specs[idx[i], , , 1])
-}
-
-labels_umap <- factor(d$CallType[idx])
-
-umap_raw <- umap(
-  spec_flat,
-  n_neighbors = 15,
-  min_dist = 0.1,
-  metric = "cosine"
-)
-
-df_umap <- data.frame(
-  UMAP1 = umap_raw[,1],
-  UMAP2 = umap_raw[,2],
-  CallType = labels_umap
-)
-
-ggplot(df_umap, aes(UMAP1, UMAP2, color = CallType)) +
-  geom_point(alpha = 0.6, size = 1) +
-  theme_minimal() +
-  labs(title = "UMAP of Raw Spectrograms")
