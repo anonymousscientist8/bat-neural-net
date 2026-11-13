@@ -1,25 +1,22 @@
 rm(list = ls())
 gc()
 
-# =========================
 # Load packages
-# =========================
-library(keras)
+library(reticulate)
+library(keras3)
 library(signal)
 library(tidyverse)
 library(tuneR)
 library(caret)
 library(uwot)
 library(RColorBrewer)
-library(dbscan)
-library(irlba)
-library(factoextra)
-library(dplyr)
+library(reticulate)
+library(tensorflow)
 
 # =========================
 # Read annotation table
 # =========================
-d <- read.csv("C:\\Users\\Raven\\AnnotationTable2.csv", header = TRUE)
+d <- read.csv("C:\\Users\\crave\\Downloads\\AnnotationTable2.csv", header = TRUE)
 unique(d$Caller)
 d <- d[is.na(d$Caller) == F,]
 
@@ -29,14 +26,10 @@ d <- d %>%
       Receiver != lag(Receiver, default = first(Receiver))
   ))
 
-# =========================
-# Encode caller
-# =========================
-call_map <- c(
-  "Alana" = 1, "Lurch" = 2, "Mochi" = 3, "Beast" = 4,
-  "Creep" = 5, "Kazul" = 6, "Yikes" = 7)
+d <- d[!duplicated(d$Filename), ]
+unique(d$Receiver)
 
-d$Caller <- as.numeric(call_map[d$Caller])
+d <- d[d$Receiver == "Alana",]
 
 # =========================
 # Stratified 80/20 split
@@ -56,17 +49,99 @@ splits <- d %>%
 # Join back to row-level data
 d_split <- d %>%
   inner_join(splits, by = c("Caller", "Receiver", "Session"))
+#d_split <- d_split[sample(nrow(d_split)), ]
+
+d_split <- d_split[d_split$Caller %in% c("Creep", "Yikes"),]
+
+a <- unique(d_split$Caller)
+a
+# for (i in 1:length(a)) {
+#   temp1 <- d_split[d_split$Caller != a[i] & d_split$split == "train",]
+#   temp2 <- d_split[d_split$Caller == a[i] & d_split$split == "train",]
+#   temp3 <- d_split[d_split$split == "test",]
+#   temp2 <- temp2[sample(1:length(temp2$Caller), min(length(temp2$Caller), 400)),]
+#   d_split <- rbind(temp1, temp2, temp3)
+# }
 
 train_idx <- which(d_split$split == "train")
 test_idx  <- which(d_split$split == "test")
 
-#=========================
-# File paths
+
+# Stratified 80/20 split
+# train_idx <- unlist(
+#   lapply(unique(d$Caller), function(k) {
+#     idx <- which(d$Caller == k)
+#     sample(idx, size = floor(0.8 * length(idx)))
+#   })
+# )
+# test_idx <- setdiff(seq_len(nrow(d)), train_idx)
+
 # =========================
-paths <- paste0(
-  "C:/Users/Raven/Vampire_audio/",
-  d_split$Filename, ".wav"
+# Encode caller
+# =========================
+# call_map <- c("Lurch" = 1,
+#               "Beast" = 2,
+#               "Mochi" = 3,
+#               "Creep" = 4,
+#               "Yikes" = 5,
+#               "Kazul" = 6,
+#               "Alana" = 7)
+
+call_map <- c("Creep" = 1, "Yikes" = 2)
+
+d_split$Caller <- as.numeric(call_map[d_split$Caller])
+
+# =========================
+# Match annotation filenames to audio files
+# =========================
+
+paths <- list.files(
+  "C:/Users/crave/Downloads/Vampire_Audio/",
+  pattern = "\\.wav$",
+  full.names = TRUE,
+  recursive = TRUE
 )
+
+# Make a lookup table from the actual audio files
+paths_df <- tibble(
+  path = paths,
+  Filename = basename(paths)
+)
+
+# Clean filenames on both sides
+d2 <- d_split %>%
+  mutate(
+    Filename_clean = tolower(trimws(basename(Filename))),
+    Filename_clean = tools::file_path_sans_ext(Filename_clean)
+  )
+
+paths_df <- paths_df %>%
+  mutate(
+    Filename_clean = tolower(trimws(Filename)),
+    Filename_clean = tools::file_path_sans_ext(Filename_clean)
+  )
+
+# Match annotations to audio files
+d2 <- d2 %>%
+  left_join(
+    paths_df %>% select(path, Filename_clean),
+    by = "Filename_clean"
+  )
+
+# Check the result
+cat("Total annotation rows:", nrow(d2), "\n")
+cat("Rows with matched audio:", sum(!is.na(d2$path)), "\n")
+cat("Rows WITHOUT audio:", sum(is.na(d2$path)), "\n")
+
+# Look at unmatched filenames
+head(
+  d2 %>%
+    filter(is.na(path)) %>%
+    select(Filename),
+  20
+)
+
+d_split <- d2
 
 # =========================
 # Audio loader
@@ -75,91 +150,27 @@ get_wave <- function(fname) {
   readWave(fname)@left / 32768
 }
 
-waves <- map(paths, get_wave)
+waves <- map(d_split$path, get_wave)
 
 lengths <- sapply(waves, length)
 
 max_samples <- max(lengths)
 
-# Downsample
-waves_ds <- lapply(waves, function(x) decimate(x, 4))
+waves_ds <- waves
 sr <- readWave(paths[1])@samp.rate
-fs <- sr / 4
-
-# =========================
-# Spectrogram parameters
-# =========================
-win_length <- 64
-hop_length <- 16
-n_fft <- 128
-
-max_time_bins <- 256   # time dimension
-max_freq_bins <- n_fft / 2 + 1
-
-# =========================
-# Spectrogram function
-# =========================
-make_spectrogram <- function(x) {
-  
-  spec <- specgram(
-    x,
-    n = n_fft,
-    Fs = fs,
-    window = hamming(win_length),
-    overlap = win_length - hop_length
-  )
-  
-  S <- spec$S
-  if (is.null(dim(S))) {
-    S <- matrix(S, ncol = 1)
-  }
-  
-  S <- abs(S)
-  
-  # Protect against zeros / invalid values
-  S[!is.finite(S)] <- 0
-  
-  S <- log10(S + 1e-8)
-  
-  S[!is.finite(S)] <- 0
-  
-  S_fixed <- matrix(0, max_freq_bins, max_time_bins)
-  
-  f <- min(nrow(S), max_freq_bins)
-  t <- min(ncol(S), max_time_bins)
-  
-  t_start <- floor((max_time_bins - t) / 2) + 1
-  S_fixed[1:f, t_start:(t_start + t - 1)] <- S[1:f, 1:t]
-  
-  # ----- SAFE normalization -----
-  mu <- mean(S_fixed, na.rm = TRUE)
-  sigma <- sd(S_fixed, na.rm = TRUE)
-  
-  if (!is.na(sigma) && sigma > 0) {
-    S_fixed <- (S_fixed - mu) / sigma
-  } else {
-    S_fixed[,] <- 0
-  }
-  
-  return(S_fixed)
-}
-
-# =========================
-# Build spectrogram array
-# =========================
-specs <- array(
-  0,
-  dim = c(length(waves_ds), max_freq_bins, max_time_bins, 1)
-)
-
-for (i in seq_along(waves_ds)) {
-  specs[i, , , 1] <- make_spectrogram(waves_ds[[i]])
-}
+fs <- sr
 
 # =========================
 # Prepare waveform array
 # =========================
-max_len <- floor(fs * 0.5) # 1 second max
+# # Normalize the amplitude by call
+for (i in 1:length(d_split$Filename)) {
+  mu <- mean(waves_ds[[i]], na.rm = TRUE)
+  sigma <- sd(waves_ds[[i]], na.rm = TRUE)
+  waves_ds[[i]] <- (waves_ds[[i]] - mu) / sigma
+}
+
+max_len <- max(lengths)
 waveforms <- matrix(0, length(waves_ds), max_len)
 for (i in seq_along(waves_ds)) {
   waveforms[i, 1:min(max_len, length(waves_ds[[i]]))] <- head(waves_ds[[i]], max_len)
@@ -178,19 +189,18 @@ x_test_wave <- array_reshape(
   c(length(test_idx), max_len, 1)
 )
 
-x_train_spec <- specs[train_idx, , , ]
-x_test_spec  <- specs[test_idx,  , , ]
-
 y_train <- d_split$Caller[train_idx] - 1
 y_test  <- d_split$Caller[test_idx] - 1
+# y_train <- d$Caller[train_idx] - 1
+# y_test  <- d$Caller[test_idx] - 1
 
-num_classes <- 7
+num_classes <- 2
 y_train <- to_categorical(y_train, num_classes)
 y_test  <- to_categorical(y_test, num_classes)
 
 # # Class weights
 counts <- as.numeric(table(apply(y_train, 1, which.max) - 1))
-weights <- sqrt(max(counts)/counts)
+weights <- (max(counts)/counts)
 class_weights <- as.list(weights)
 names(class_weights) <- 0:(length(weights)-1)
 
@@ -204,23 +214,17 @@ wave_branch <- wave_input %>%
   layer_max_pooling_1d(8) %>%
   layer_conv_1d(16, 32, activation = "gelu") %>%
   layer_max_pooling_1d(8) %>%
+  layer_conv_1d(32, 64, activation = "gelu") %>%
+  layer_max_pooling_1d(8) %>%
   layer_gru(32)
 
-# Spectrogram branch
-spec_input <- layer_input(shape = c(max_freq_bins, max_time_bins, 1), name = "spec_input")
-spec_branch <- spec_input %>%
-  layer_conv_2d(8, c(8,8), activation = "gelu") %>%
-  layer_max_pooling_2d(c(2,2)) %>%
-  layer_conv_2d(16, c(16,16), activation = "gelu") %>%
-  layer_global_average_pooling_2d()
-
 # Combine
-combined <- layer_concatenate(list(wave_branch, spec_branch)) %>%
+combined <- layer_concatenate(list(wave_branch)) %>%#, spec_branch)) %>%
   layer_dense(32, activation = "gelu") %>%
-  layer_dropout(0.3) %>%
+  #layer_dropout(0.3) %>%
   layer_dense(num_classes, activation = "softmax")
 
-model <- keras_model(inputs = list(wave_input, spec_input), outputs = combined)
+model <- keras_model(inputs = wave_input, outputs = combined)
 
 model %>% compile(
   optimizer = optimizer_adam(1e-3),
@@ -234,18 +238,18 @@ summary(model)
 # Train
 # =========================
 history <- model %>% fit(
-  x = list(x_train_wave, x_train_spec),
+  x = x_train_wave,
   y = y_train,
   batch_size = 16,
-  epochs = 10,
-  class_weight = class_weights,
+  epochs = 20,
+  #class_weight = class_weights,
   validation_split = 0
 )
 
 # =========================
 # Evaluate
 # =========================
-y_pred_probs <- model %>% predict(list(x_test_wave, x_test_spec))
+y_pred_probs <- model %>% predict(list(x_test_wave))
 max_probs <- y_pred_probs[max.col(y_pred_probs)]
 y_pred <- apply(y_pred_probs, 1, which.max) - 1
 y_true <- apply(y_test, 1, which.max) - 1
@@ -268,71 +272,3 @@ top_k_accuracy <- mean(top_k_correct)
 cat("Top-2 accuracy: ", top_k_accuracy, "\n")
 
 confusionMatrix(factor(y_pred), factor(y_true))
-
-# =========================
-# UMAP
-# =========================
-embed_model <- keras_model(
-  inputs = model$inputs,
-  outputs = get_layer(model, "dense_43")$output
-)
-
-emb <- predict(embed_model, list(x_test_wave, x_test_spec))
-
-# fviz_nbclust(emb, kmeans, method = "gap_stat", k.max = 20)
-# K <- 12
-# km <- kmeans(emb, centers = K)
-km <- hdbscan(emb, minPts = 10)
-clusters <- km$cluster
-unique_clusters <- sort(unique(clusters))
-
-um <- umap(
-  emb,
-  n_neighbors = 15,
-  min_dist = 0.1,
-  metric = "cosine"
-)
-
-df <- data.frame(
-  UMAP1 = um[,1],
-  UMAP2 = um[,2],
-  Caller = factor(y_true),
-  Correct = y_pred == y_true,
-  Cluster = factor(clusters)
-)
-
-ggplot(df, aes(UMAP1, UMAP2, color = Caller)) +
-  geom_point(size=1, alpha=0.7) +
-  theme_minimal() +
-  ggtitle("UMAP of waveform + spectrogram embeddings")
-
-ggplot(df, aes(UMAP1, UMAP2, color = Correct)) +
-  geom_point(alpha = 0.7, size = 1) +
-  theme_minimal() +
-  labs(title = "UMAP: Correct vs Incorrect")
-
-ggplot(df, aes(UMAP1, UMAP2, color = Cluster)) +
-  geom_point(alpha = 0.7, size = 1) +
-  theme_minimal() +
-  labs(title = "UMAP: Correct vs Incorrect")
-
-plot_spec <- function(mat, title=NULL) {
-  image(t(mat[nrow(mat):1, ]), col=gray.colors(100), axes=FALSE, main=title)
-}
-
-unique_clusters <- sort(unique(clusters))
-
-for (cl in unique_clusters) {
-  idx <- which(clusters == cl)
-  samp <- sample(idx, min(9, length(idx)))
-  
-  par(mfrow=c(3,3), mar=c(1,1,2,1))
-  
-  for (i in samp) {
-    plot_spec(specs[i,,,1], paste("Cluster", cl))
-  }
-  
-  readline(prompt=paste("Cluster", cl, "- press enter for next"))
-}
-
-
